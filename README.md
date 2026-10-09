@@ -78,3 +78,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 |---|---|
 | `mac-keys.ahk` | 全部逻辑与详细注释（覆盖范围、代价、首次运行需确认的事项都写在里面） |
 | `build.ps1` | 编译脚本 |
+
+## License
+
+[MIT](LICENSE)
