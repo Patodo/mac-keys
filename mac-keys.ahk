@@ -30,6 +30,14 @@ if !A_IsAdmin {
     ExitApp
 }
 
+; ---------- 开机自启（任务计划程序：登录触发 + 最高权限，免 UAC）--------
+; 默认开启：每次启动自动重建计划任务，exe/脚本挪了位置也能自愈。
+; 想关闭：托盘菜单 -> "开机自启"（会在脚本目录生成 autostart-off.flag）。
+A_TrayMenu.Insert('1&', '开机自启', AutoStartToggle)
+if !FileExist(A_ScriptDir '\autostart-off.flag')
+    try AutoStartRegister()
+AutoStartSyncCheck()
+
 ; ---------- 生效范围的判定 --------------------------------------------
 isEditor() {
     return WinActive("ahk_exe Code.exe")
@@ -41,6 +49,55 @@ isConsole() {
     return WinActive("ahk_class ConsoleWindowClass")   ; 经典 conhost 窗口（cmd / powershell）
         || WinActive("ahk_exe WindowsTerminal.exe")     ; Windows Terminal（含 WSL 标签页）
         || WinActive("ahk_class mintty")                ; Git Bash / MSYS2
+}
+
+; ---------- 开机自启的实现 ---------------------------------------------
+; 用 schtasks 注册"登录时触发、以最高权限运行"的任务。关键点：
+;  1) 只有管理员能创建最高权限任务，而本脚本已自动提权，所以建得动；
+;  2) 任务由计划任务服务提权启动，登录时不再弹 UAC；
+;  3) /TR 里的路径要整体加引号，路径内部的引号要转义成 \"，
+;     否则带空格的路径（C:\Program Files\...）会被切碎。
+AutoStartTarget() {
+    return A_IsCompiled ? '"' A_ScriptFullPath '"'
+                        : '"' A_AhkPath '" "' A_ScriptFullPath '"'
+}
+AutoStartRegister() {
+    tr := StrReplace(AutoStartTarget(), '"', '\"')
+    ec := 0
+    RunWait 'schtasks /Create /F /TN "mac-keys" /SC ONLOGON /RL HIGHEST /TR "' tr '"', , 'Hide', &ec
+    return ec = 0
+}
+AutoStartUnregister() {
+    ec := 0
+    RunWait 'schtasks /Delete /TN "mac-keys" /F', , 'Hide', &ec
+    return ec = 0
+}
+AutoStartExists() {
+    ec := 1
+    RunWait 'schtasks /Query /TN "mac-keys"', , 'Hide', &ec
+    return ec = 0
+}
+AutoStartSyncCheck() {
+    if AutoStartExists()
+        A_TrayMenu.Check('开机自启')
+    else
+        A_TrayMenu.Uncheck('开机自启')
+}
+AutoStartToggle(*) {
+    flag := A_ScriptDir '\autostart-off.flag'
+    if AutoStartExists() {
+        AutoStartUnregister()
+        FileAppend('off', flag)
+        ToolTip('开机自启已关闭（任务已删除）')
+    } else {
+        try FileDelete(flag)
+        if AutoStartRegister()
+            ToolTip('开机自启已开启（登录时自动运行）')
+        else
+            ToolTip('开机自启任务创建失败，请查看脚本注释')
+    }
+    SetTimer(() => ToolTip(), -1500)
+    AutoStartSyncCheck()
 }
 
 ; ---------- Alt 层：Mac 的 Command，全局生效 --------------------------
@@ -160,9 +217,10 @@ isConsole() {
 ; !Left::Send("{Home}")
 ; !Right::Send("{End}")
 ;
-; 【开机自启】脚本要求管理员，直接放进 shell:startup 每次登录都会弹 UAC。
-;   想免弹窗：任务计划程序 -> 创建任务 -> 常规勾"使用最高权限运行"，
-;   触发器选"登录时"，操作指向本 exe。这样启动既提权又不弹窗。
+; 【开机自启】默认开启：每次启动自动重建名为 mac-keys 的计划任务（登录
+;   触发 + 最高权限），登录时静默提权启动、不弹 UAC。托盘菜单"开机自启"
+;   可关闭（在脚本同目录生成 autostart-off.flag 标记，已 gitignore）。
+;   之前手动配任务计划或 shell:startup 的，可以删掉旧条目避免重复启动。
 ;
 ; 【首次运行请确认三件事】① 启动时弹的 UAC 是本脚本自动提权，选"是"；
 ;   ② 按 Win+Z 只切换自动换行，不弹出系统的"贴边布局"面板；

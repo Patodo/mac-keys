@@ -2,3 +2,5 @@
 tools/
 *.exe
 *.zip
+# runtime markers
+*.flag
